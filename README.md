@@ -1,4 +1,7 @@
-# MobaLiveCD Linux
+# MobaLiveCD AI
+
+> 🚀 **AI-Enhanced Linux ISO Virtualization Tool**  
+> Built upon the excellent foundation of [MobaLiveCD Linux](https://github.com/wlfogle/mobalivecd-linux) by wlfogle
 
 A Linux port of the MobaLiveCD application - a QEMU-based LiveCD/ISO testing tool with a user-friendly GUI.
 
@@ -193,8 +196,19 @@ sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1     # Ubuntu
 - Add user to `kvm` group: `sudo usermod -a -G kvm $USER`
 - Reboot after group changes
 
-## License
+## 🙏 Attribution & Credits
 
-GPL v2+ (same as original MobaLiveCD)
+**This project is built upon and enhances:**
+- **Original Project**: [MobaLiveCD Linux](https://github.com/wlfogle/mobalivecd-linux) by **wlfogle**
+- **License**: GPL v2+ (preserved and respected)
+- **Enhancement**: AI capabilities, modern UI, advanced packaging
 
-Based on the original MobaLiveCD for Windows. This Linux port maintains the same functionality while providing native Linux desktop integration.
+**Full acknowledgments**: See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for complete credits and attribution.
+
+This enhanced version maintains the same core functionality while adding AI-powered features and modern Linux desktop integration.
+
+## 📄 License
+
+GPL v2+ (Same as original project)
+
+Based on the excellent foundation of MobaLiveCD Linux by wlfogle. All enhancements preserve the original GPL v2+ license and maintain full attribution to the original creator.
