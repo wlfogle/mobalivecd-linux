@@ -14,7 +14,7 @@ class QEMURunner:
     
     def __init__(self):
         self.qemu_binary = self.find_qemu_binary()
-        self.default_memory = "512M"
+        self.default_memory = "2G"  # Increased from 512M for modern ISOs
         self.default_disk_interface = "ide"
         self.use_kvm = self.check_kvm_support()
         
@@ -50,11 +50,11 @@ class QEMURunner:
         memory = options.get('memory', self.default_memory)
         cmd.extend(['-m', memory])
         
-        # Acceleration
+        # Machine type (includes acceleration)
         if self.use_kvm and options.get('enable_kvm', True):
-            cmd.extend(['-accel', 'kvm'])
+            cmd.extend(['-machine', 'pc-i440fx-7.2,accel=kvm'])
         else:
-            cmd.extend(['-accel', 'tcg'])
+            cmd.extend(['-machine', 'pc-i440fx-7.2,accel=tcg'])
         
         # CPU - use host CPU if KVM is available
         if self.use_kvm:
@@ -68,15 +68,15 @@ class QEMURunner:
             # Use GTK display (remove GL to avoid potential issues)
             cmd.extend(['-display', 'gtk'])
         
-        # VGA
-        vga = options.get('vga', 'std')
+        # VGA - use virtio for better performance
+        vga = options.get('vga', 'virtio')
         cmd.extend(['-vga', vga])
         
-        # Boot from CD-ROM
-        cmd.extend(['-boot', 'd'])
+        # Boot configuration - more reliable boot order
+        cmd.extend(['-boot', 'order=d,menu=on'])
         
-        # Add ISO as CD-ROM
-        cmd.extend(['-cdrom', iso_path])
+        # Add ISO as CD-ROM with better caching
+        cmd.extend(['-drive', f'file={iso_path},media=cdrom,readonly=on,cache=unsafe'])
         
         # Audio (simplified to avoid PulseAudio issues)
         if options.get('enable_audio', False):  # Disabled by default
@@ -92,8 +92,14 @@ class QEMURunner:
             cmd.extend(['-netdev', 'user,id=net0'])
             cmd.extend(['-device', 'rtl8139,netdev=net0'])
         
-        # Disable reboot on exit
+        # Additional options for better ISO compatibility
         cmd.extend(['-no-reboot'])
+        
+        # Enable more CPU features for better compatibility
+        if not self.use_kvm:
+            cmd.extend(['-cpu', 'max'])
+        
+        # Machine type already set above with acceleration
         
         return cmd
     
