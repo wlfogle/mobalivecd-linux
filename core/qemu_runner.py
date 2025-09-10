@@ -14,7 +14,7 @@ class QEMURunner:
     
     def __init__(self):
         self.qemu_binary = self.find_qemu_binary()
-        self.default_memory = "2G"  # Increased from 512M for modern ISOs
+        self.default_memory = "16384M"  # 16 GB for testing large ISOs
         self.default_disk_interface = "ide"
         self.use_kvm = self.check_kvm_support()
         
