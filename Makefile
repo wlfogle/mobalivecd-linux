@@ -13,7 +13,7 @@ APPDIR = $(DATADIR)/applications
 ICONDIR = $(DATADIR)/pixmaps
 
 # Installation targets
-.PHONY: install uninstall clean test run check
+.PHONY: install uninstall clean test run check create-usb list-usb
 
 # Default target
 all:
@@ -25,6 +25,8 @@ all:
 	@echo "  run         - Run application directly"
 	@echo "  test        - Test application"
 	@echo "  check       - Check dependencies"
+	@echo "  list-usb    - List available USB devices"
+	@echo "  create-usb  - Create bootable USB (interactive mode)"
 	@echo "  clean       - Clean temporary files"
 
 # Check dependencies
@@ -93,6 +95,15 @@ clean:
 	@find . -name "*.pyc" -delete
 	@find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Cleanup completed"
+
+# USB creation targets
+list-usb:
+	@echo "Listing available USB devices..."
+	@python3 ./create_usb.py --list
+
+create-usb: check
+	@echo "Starting interactive USB creation..."
+	@python3 ./create_usb.py --interactive
 
 # Help
 help: all

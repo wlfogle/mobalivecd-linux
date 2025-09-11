@@ -40,8 +40,13 @@ class QEMURunner:
         except:
             return False
     
-    def build_qemu_command(self, iso_path, **options):
-        """Build QEMU command line arguments"""
+    def build_qemu_command(self, boot_source, **options):
+        """Build QEMU command line arguments
+        
+        Args:
+            boot_source: Path to ISO file or USB device (e.g. /dev/sdb)
+            **options: Additional QEMU options
+        """
         
         # Base command
         cmd = [self.qemu_binary]
@@ -75,8 +80,16 @@ class QEMURunner:
         # Boot configuration - more reliable boot order
         cmd.extend(['-boot', 'order=d,menu=on'])
         
-        # Add ISO as CD-ROM with better caching
-        cmd.extend(['-drive', f'file={iso_path},media=cdrom,readonly=on,cache=unsafe'])
+        # Determine if boot source is USB device or ISO file
+        is_usb_device = self._is_usb_device(boot_source)
+        
+        if is_usb_device:
+            # Add USB device as disk drive
+            cmd.extend(['-drive', f'file={boot_source},format=raw,cache=unsafe,if=none,id=usbdisk'])
+            cmd.extend(['-device', 'usb-storage,drive=usbdisk,bootindex=1'])
+        else:
+            # Add ISO as CD-ROM with better caching
+            cmd.extend(['-drive', f'file={boot_source},media=cdrom,readonly=on,cache=unsafe'])
         
         # Audio (simplified to avoid PulseAudio issues)
         if options.get('enable_audio', False):  # Disabled by default
@@ -103,13 +116,18 @@ class QEMURunner:
         
         return cmd
     
-    def run_iso(self, iso_path, **options):
-        """Run an ISO file with QEMU"""
-        if not os.path.exists(iso_path):
-            raise FileNotFoundError(f"ISO file not found: {iso_path}")
+    def _is_usb_device(self, path):
+        """Check if path is a USB device (e.g., /dev/sdb)"""
+        return path.startswith('/dev/') and not path.lower().endswith('.iso')
+    
+    def run_boot_source(self, boot_source, **options):
+        """Run a boot source (ISO file or USB device) with QEMU"""
+        if not os.path.exists(boot_source):
+            source_type = "USB device" if self._is_usb_device(boot_source) else "ISO file"
+            raise FileNotFoundError(f"{source_type} not found: {boot_source}")
         
         # Build command
-        cmd = self.build_qemu_command(iso_path, **options)
+        cmd = self.build_qemu_command(boot_source, **options)
         
         # Log the command for debugging
         print(f"Running: {' '.join(cmd)}")
@@ -141,6 +159,10 @@ class QEMURunner:
             # User cancelled - this is normal
             pass
     
+    def run_iso(self, iso_path, **options):
+        """Run an ISO file with QEMU (backward compatibility)"""
+        return self.run_boot_source(iso_path, **options)
+    
     def get_system_info(self):
         """Get system information for diagnostics"""
         info = {
@@ -164,20 +186,50 @@ class QEMURunner:
         
         return info
     
+    def validate_boot_source(self, boot_source):
+        """Basic validation of boot source (ISO file or USB device)"""
+        if not os.path.exists(boot_source):
+            return False, "Boot source does not exist"
+        
+        if self._is_usb_device(boot_source):
+            # Validate USB device
+            try:
+                # Check if it's a block device
+                import stat
+                st = os.stat(boot_source)
+                if not stat.S_ISBLK(st.st_mode):
+                    return False, "Not a valid block device"
+                
+                # Check if device has some size
+                size = st.st_size
+                if size == 0:
+                    # For block devices, size might be 0, try to read device size differently
+                    try:
+                        with open(boot_source, 'rb') as f:
+                            f.seek(0, 2)  # Seek to end
+                            size = f.tell()
+                    except (OSError, IOError):
+                        pass  # Size check not critical for USB devices
+                        
+                return True, "Valid USB device"
+                
+            except OSError as e:
+                return False, f"Cannot access device: {e}"
+        else:
+            # Validate ISO file
+            if not boot_source.lower().endswith('.iso'):
+                return False, "File does not have .iso extension"
+            
+            # Check file size (should be > 1MB for a valid ISO)
+            try:
+                size = os.path.getsize(boot_source)
+                if size < 1024 * 1024:  # 1MB
+                    return False, "File too small to be a valid ISO"
+            except OSError as e:
+                return False, f"Cannot read file: {e}"
+            
+            return True, "Valid ISO file"
+    
     def validate_iso(self, iso_path):
-        """Basic validation of ISO file"""
-        if not os.path.exists(iso_path):
-            return False, "File does not exist"
-        
-        if not iso_path.lower().endswith('.iso'):
-            return False, "File does not have .iso extension"
-        
-        # Check file size (should be > 1MB for a valid ISO)
-        try:
-            size = os.path.getsize(iso_path)
-            if size < 1024 * 1024:  # 1MB
-                return False, "File too small to be a valid ISO"
-        except OSError as e:
-            return False, f"Cannot read file: {e}"
-        
-        return True, "Valid ISO file"
+        """Basic validation of ISO file (backward compatibility)"""
+        return self.validate_boot_source(iso_path)

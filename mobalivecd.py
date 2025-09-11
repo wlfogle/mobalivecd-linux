@@ -27,24 +27,29 @@ class MobaLiveCDApplication(Adw.Application):
         self.connect('activate', self.on_activate)
         self.connect('open', self.on_open)
         
-        # Store ISO file if passed as argument
-        self.iso_file = None
+        # Store boot source if passed as argument
+        self.boot_source = None
         
     def on_activate(self, app):
         """Called when application is activated"""
         self.window = MobaLiveCDWindow(application=self)
         self.window.present()
         
-        # If we have an ISO file from command line, load it (but don't run)
-        if self.iso_file:
-            self.window.load_iso_file(self.iso_file)
+        # If we have a boot source from command line, load it (but don't run)
+        if self.boot_source:
+            if self.boot_source.startswith('/dev/'):
+                # It's a USB device
+                self.window.load_boot_source(self.boot_source, 'usb')
+            else:
+                # It's likely an ISO file
+                self.window.load_boot_source(self.boot_source, 'iso')
     
     def on_open(self, app, files, n_files, hint):
         """Called when application is opened with files"""
         if n_files > 0:
             # Take the first file
             file = files[0]
-            self.iso_file = file.get_path()
+            self.boot_source = file.get_path()
         
         self.activate()
 
@@ -54,11 +59,12 @@ def main():
     
     # Handle command line arguments
     if len(sys.argv) > 1:
-        iso_path = sys.argv[1]
-        if os.path.exists(iso_path):
-            app.iso_file = iso_path
+        boot_source_path = sys.argv[1]
+        if os.path.exists(boot_source_path):
+            app.boot_source = boot_source_path
         else:
-            print(f"Error: ISO file '{iso_path}' not found")
+            source_type = "USB device" if boot_source_path.startswith('/dev/') else "ISO file"
+            print(f"Error: {source_type} '{boot_source_path}' not found")
             return 1
     
     return app.run(sys.argv)

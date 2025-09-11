@@ -12,11 +12,14 @@ MobaLiveCD Linux allows you to easily test bootable CD/DVD ISO images using QEMU
 ## Features
 
 - Simple GUI for selecting and running ISO files
+- **NEW: USB Booting** - Boot USB devices directly in QEMU for testing
+- **NEW: USB Creation** - Create bootable USB drives directly from ISO files
 - Built-in QEMU integration with optimized settings
 - File association support (right-click context menu for ISO files)
 - Multi-language support
 - Modern GTK4 interface
 - Native Linux integration
+- Command-line USB creation tool
 
 ## Requirements
 
@@ -108,6 +111,48 @@ Unlike the original Windows version that bundled QEMU, this Linux version uses t
 
 The application can register itself as a handler for ISO files, allowing right-click "Open with MobaLiveCD" functionality.
 
+## USB Booting
+
+**New Feature**: Boot USB devices directly in QEMU for testing!
+
+### GUI Method
+1. Click the "Select USB..." button
+2. Choose a USB device from the list
+3. Click "Boot in QEMU" to test the USB device
+
+### Command Line Method
+```bash
+# Boot USB device directly
+python3 mobalivecd.py /dev/sdb
+```
+
+## USB Creation
+
+**New Feature**: Create bootable USB drives directly from ISO files!
+
+### GUI Method
+1. Select an ISO file using the "Browse ISO..." button
+2. Click the "Create USB" button (appears when ISO is selected)
+3. Select your USB device from the list
+4. Confirm and wait for completion
+
+### Command Line Method
+```bash
+# Interactive mode
+python3 create_usb.py
+
+# List USB devices
+make list-usb
+
+# Create USB interactively
+make create-usb
+
+# Direct creation (advanced)
+sudo python3 create_usb.py --iso myfile.iso --device /dev/sdb
+```
+
+See [USB_CREATION.md](USB_CREATION.md) for detailed documentation.
+
 ## Testing
 
 The application has been tested with:
@@ -115,6 +160,8 @@ The application has been tested with:
 - **KVM**: Hardware acceleration available and working
 - **GUI**: GTK4/Libadwaita interface
 - **ISO Support**: Standard ISO 9660 images
+- **USB Booting**: USB flash drives with bootable content
+- **USB Creation**: Various Linux distributions and rescue disks
 
 ### Command Line Testing
 

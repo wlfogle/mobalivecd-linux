@@ -12,6 +12,8 @@ import threading
 from core.qemu_runner import QEMURunner
 from ui.help_dialog import HelpDialog
 from ui.about_dialog import AboutDialog
+from ui.usb_dialog import USBCreationDialog
+from ui.usb_selector_dialog import USBSelectorDialog
 
 class MobaLiveCDWindow(Adw.ApplicationWindow):
     """Main application window"""
@@ -21,7 +23,8 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         
         # Initialize QEMU runner
         self.qemu_runner = QEMURunner()
-        self.current_iso = None
+        self.current_boot_source = None
+        self.boot_source_type = None  # 'iso' or 'usb'
         
         # Set up window properties
         self.set_title("MobaLiveCD")
@@ -123,49 +126,77 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         parent.append(assoc_group)
     
     def create_iso_section(self, parent):
-        """Create ISO file selection section"""
-        iso_group = Adw.PreferencesGroup()
-        iso_group.set_title("Start LiveCD")
+        """Create boot source selection section"""
+        boot_group = Adw.PreferencesGroup()
+        boot_group.set_title("Boot Source Selection")
+        boot_group.set_description("Select either an ISO file or USB device to boot in QEMU")
         
-        # ISO selection row
-        iso_row = Adw.ActionRow()
-        iso_row.set_title("Choose and run an ISO image file")
-        iso_row.set_subtitle("Browse your disk to select an ISO file and start it with QEMU")
+        # Boot source selection row
+        boot_row = Adw.ActionRow()
+        boot_row.set_title("Choose boot source")
+        boot_row.set_subtitle("Select an ISO file or USB device to boot in QEMU virtual machine")
         
-        # Current ISO label
-        self.iso_label = Gtk.Label()
-        self.iso_label.set_text("No ISO file selected")
-        self.iso_label.set_halign(Gtk.Align.START)
-        self.iso_label.add_css_class("dim-label")
+        # Current boot source label
+        self.boot_source_label = Gtk.Label()
+        self.boot_source_label.set_text("No boot source selected")
+        self.boot_source_label.set_halign(Gtk.Align.START)
+        self.boot_source_label.add_css_class("dim-label")
         
         # Buttons container
         button_box = Gtk.Box(spacing=6)
         button_box.set_valign(Gtk.Align.CENTER)
         
-        # Browse button
-        browse_button = Gtk.Button()
-        browse_button.set_label("Browse...")
-        browse_button.connect("clicked", self.on_browse_iso)
-        button_box.append(browse_button)
+        # Browse ISO button
+        browse_iso_button = Gtk.Button()
+        browse_iso_button.set_label("Browse ISO...")
+        browse_iso_button.connect("clicked", self.on_browse_iso)
+        button_box.append(browse_iso_button)
+        
+        # Select USB button
+        select_usb_button = Gtk.Button()
+        select_usb_button.set_label("Select USB...")
+        select_usb_button.connect("clicked", self.on_select_usb)
+        button_box.append(select_usb_button)
         
         # Run button
         self.run_button = Gtk.Button()
-        self.run_button.set_label("Run LiveCD")
+        self.run_button.set_label("Boot in QEMU")
         self.run_button.add_css_class("suggested-action")
         self.run_button.set_sensitive(False)
-        self.run_button.connect("clicked", self.on_run_iso)
+        self.run_button.connect("clicked", self.on_run_boot_source)
         button_box.append(self.run_button)
         
-        iso_row.add_suffix(button_box)
-        iso_group.add(iso_row)
+        boot_row.add_suffix(button_box)
+        boot_group.add(boot_row)
         
-        # Add ISO label as second row
-        iso_label_row = Adw.ActionRow()
-        iso_label_row.set_title("")
-        iso_label_row.add_prefix(self.iso_label)
-        iso_group.add(iso_label_row)
+        # Add boot source label as second row
+        boot_label_row = Adw.ActionRow()
+        boot_label_row.set_title("")
+        boot_label_row.add_prefix(self.boot_source_label)
+        boot_group.add(boot_label_row)
         
-        parent.append(iso_group)
+        # USB creation section (only show when ISO is selected)
+        self.usb_creation_group = Adw.PreferencesGroup()
+        self.usb_creation_group.set_title("USB Creation")
+        self.usb_creation_group.set_visible(False)
+        
+        usb_creation_row = Adw.ActionRow()
+        usb_creation_row.set_title("Create bootable USB drive")
+        usb_creation_row.set_subtitle("Create a bootable USB drive from the selected ISO file")
+        
+        # USB creation button
+        self.usb_button = Gtk.Button()
+        self.usb_button.set_label("Create USB")
+        self.usb_button.add_css_class("destructive-action")
+        self.usb_button.set_sensitive(False)
+        self.usb_button.connect("clicked", self.on_create_usb)
+        self.usb_button.set_tooltip_text("Create a bootable USB drive from this ISO")
+        usb_creation_row.add_suffix(self.usb_button)
+        
+        self.usb_creation_group.add(usb_creation_row)
+        
+        parent.append(boot_group)
+        parent.append(self.usb_creation_group)
     
     def create_action_buttons(self, parent):
         """Create bottom action buttons"""
@@ -229,20 +260,51 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         
         dialog.destroy()
     
-    def load_iso_file(self, iso_path):
-        """Load an ISO file"""
-        if os.path.exists(iso_path) and iso_path.lower().endswith('.iso'):
-            self.current_iso = iso_path
-            self.iso_label.set_text(f"Selected: {os.path.basename(iso_path)}")
-            self.iso_label.remove_css_class("dim-label")
+    def load_boot_source(self, source_path, source_type):
+        """Load a boot source (ISO file or USB device)"""
+        # Validate the boot source
+        is_valid, message = self.qemu_runner.validate_boot_source(source_path)
+        
+        if is_valid:
+            self.current_boot_source = source_path
+            self.boot_source_type = source_type
+            
+            if source_type == 'iso':
+                self.boot_source_label.set_text(f"ISO: {os.path.basename(source_path)}")
+                self.usb_creation_group.set_visible(True)
+                self.usb_button.set_sensitive(True)
+            else:  # USB device
+                self.boot_source_label.set_text(f"USB: {source_path}")
+                self.usb_creation_group.set_visible(False)
+                self.usb_button.set_sensitive(False)
+            
+            self.boot_source_label.remove_css_class("dim-label")
             self.run_button.set_sensitive(True)
-            print(f"Loaded ISO: {iso_path}")  # Debug info
+            print(f"Loaded {source_type.upper()}: {source_path}")  # Debug info
         else:
-            self.show_error("Invalid ISO file selected")
+            self.show_error(f"Invalid {source_type}: {message}")
     
-    def on_run_iso(self, button):
-        """Handle running the ISO"""
-        if not self.current_iso:
+    def load_iso_file(self, iso_path):
+        """Load an ISO file (backward compatibility)"""
+        self.load_boot_source(iso_path, 'iso')
+    
+    def on_select_usb(self, button):
+        """Handle USB device selection"""
+        dialog = USBSelectorDialog(self)
+        dialog.present()
+        
+        def on_dialog_response(dialog, response_id):
+            if response_id == 'select':
+                device_path = dialog.get_selected_device()
+                if device_path:
+                    self.load_boot_source(device_path, 'usb')
+            dialog.destroy()
+        
+        dialog.connect('response', on_dialog_response)
+    
+    def on_run_boot_source(self, button):
+        """Handle running the boot source (ISO or USB)"""
+        if not self.current_boot_source:
             return
         
         # Disable button during execution
@@ -252,7 +314,7 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         # Run QEMU in a separate thread
         def run_qemu():
             try:
-                self.qemu_runner.run_iso(self.current_iso)
+                self.qemu_runner.run_boot_source(self.current_boot_source)
             except Exception as e:
                 GLib.idle_add(self.show_error, f"Failed to start QEMU: {str(e)}")
             finally:
@@ -261,10 +323,24 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         thread = threading.Thread(target=run_qemu, daemon=True)
         thread.start()
     
+    def on_run_iso(self, button):
+        """Handle running the ISO (backward compatibility)"""
+        self.on_run_boot_source(button)
+    
     def reset_run_button(self):
         """Reset run button state"""
         self.run_button.set_sensitive(True)
-        self.run_button.set_label("Run LiveCD")
+        self.run_button.set_label("Boot in QEMU")
+    
+    def on_create_usb(self, button):
+        """Handle USB creation"""
+        if not self.current_boot_source or self.boot_source_type != 'iso':
+            self.show_error("Please select an ISO file first to create a USB drive")
+            return
+        
+        # Show USB creation dialog
+        dialog = USBCreationDialog(self, self.current_boot_source)
+        dialog.present()
     
     def on_install_association(self, button):
         """Handle installing file association"""
