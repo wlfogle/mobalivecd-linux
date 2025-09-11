@@ -51,15 +51,25 @@ class QEMURunner:
         # Base command
         cmd = [self.qemu_binary]
         
-        # Memory
-        memory = options.get('memory', self.default_memory)
+        # Memory - reduce for USB devices to avoid memory mapping issues
+        if self._is_usb_device(boot_source):
+            memory = options.get('memory', '4096M')  # 4GB for USB devices
+        else:
+            memory = options.get('memory', self.default_memory)  # 16GB for ISOs
         cmd.extend(['-m', memory])
         
-        # Machine type (includes acceleration)
-        if self.use_kvm and options.get('enable_kvm', True):
-            cmd.extend(['-machine', 'pc-i440fx-7.2,accel=kvm'])
+        # Machine type - use compatible version for USB devices
+        if self._is_usb_device(boot_source):
+            # Use older, more compatible machine type for Ventoy
+            machine_type = 'pc-q35-2.12'
         else:
-            cmd.extend(['-machine', 'pc-i440fx-7.2,accel=tcg'])
+            # Use modern machine type for ISOs
+            machine_type = 'pc-i440fx-7.2'
+            
+        if self.use_kvm and options.get('enable_kvm', True):
+            cmd.extend(['-machine', f'{machine_type},accel=kvm'])
+        else:
+            cmd.extend(['-machine', f'{machine_type},accel=tcg'])
         
         # CPU - use host CPU if KVM is available
         if self.use_kvm:
@@ -73,20 +83,29 @@ class QEMURunner:
             # Use GTK display (remove GL to avoid potential issues)
             cmd.extend(['-display', 'gtk'])
         
-        # VGA - use virtio for better performance
-        vga = options.get('vga', 'virtio')
+        # VGA - adjust based on boot source
+        if self._is_usb_device(boot_source):
+            # Use standard VGA for USB devices (better Ventoy compatibility)
+            vga = options.get('vga', 'std')
+        else:
+            # Use virtio for ISO files (better performance)
+            vga = options.get('vga', 'virtio')
         cmd.extend(['-vga', vga])
         
-        # Boot configuration - more reliable boot order
-        cmd.extend(['-boot', 'order=d,menu=on'])
+        # Boot configuration - adjust based on device type
+        if self._is_usb_device(boot_source):
+            # For USB devices - use proper USB boot order
+            cmd.extend(['-boot', 'order=c,menu=on'])  # c = hard drive (where USB is mounted)
+        else:
+            # For ISO files, boot from CD-ROM
+            cmd.extend(['-boot', 'order=d,menu=on'])  # d = CD-ROM
         
         # Determine if boot source is USB device or ISO file
         is_usb_device = self._is_usb_device(boot_source)
         
         if is_usb_device:
-            # Add USB device as disk drive
-            cmd.extend(['-drive', f'file={boot_source},format=raw,cache=unsafe,if=none,id=usbdisk'])
-            cmd.extend(['-device', 'usb-storage,drive=usbdisk,bootindex=1'])
+            # Add USB device as primary hard drive for better compatibility with Ventoy
+            cmd.extend(['-hda', boot_source])
         else:
             # Add ISO as CD-ROM with better caching
             cmd.extend(['-drive', f'file={boot_source},media=cdrom,readonly=on,cache=unsafe'])
@@ -105,8 +124,14 @@ class QEMURunner:
             cmd.extend(['-netdev', 'user,id=net0'])
             cmd.extend(['-device', 'rtl8139,netdev=net0'])
         
-        # Additional options for better ISO compatibility
+        # Additional options for better compatibility
         cmd.extend(['-no-reboot'])
+        
+        # For USB devices (like Ventoy), add specific compatibility options
+        if self._is_usb_device(boot_source):
+            # Use standard VGA for better Ventoy compatibility
+            # Ventoy sometimes has issues with virtio-vga
+            pass
         
         # Enable more CPU features for better compatibility
         if not self.use_kvm:
@@ -120,6 +145,15 @@ class QEMURunner:
         """Check if path is a USB device (e.g., /dev/sdb)"""
         return path.startswith('/dev/') and not path.lower().endswith('.iso')
     
+    def _can_access_device(self, device_path):
+        """Check if we can access the device without sudo"""
+        try:
+            with open(device_path, 'rb') as f:
+                f.read(1)
+            return True
+        except (OSError, PermissionError):
+            return False
+    
     def run_boot_source(self, boot_source, **options):
         """Run a boot source (ISO file or USB device) with QEMU"""
         if not os.path.exists(boot_source):
@@ -128,6 +162,12 @@ class QEMURunner:
         
         # Build command
         cmd = self.build_qemu_command(boot_source, **options)
+        
+        # Check if we need sudo for USB device access
+        if self._is_usb_device(boot_source):
+            if not self._can_access_device(boot_source):
+                print(f"USB device requires elevated permissions, using sudo...")
+                cmd = ['sudo'] + cmd
         
         # Log the command for debugging
         print(f"Running: {' '.join(cmd)}")
