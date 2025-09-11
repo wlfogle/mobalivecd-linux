@@ -4,6 +4,7 @@ Handles QEMU execution and configuration
 """
 
 import os
+import stat
 import subprocess
 import shutil
 import tempfile
@@ -94,8 +95,8 @@ class QEMURunner:
         
         # Boot configuration - adjust based on device type
         if self._is_usb_device(boot_source):
-            # For USB devices - use proper USB boot order
-            cmd.extend(['-boot', 'order=c,menu=on'])  # c = hard drive (where USB is mounted)
+            # For USB devices - comprehensive boot configuration with timeout
+            cmd.extend(['-boot', 'order=c,menu=on,strict=off,splash-time=10000'])  # 10s timeout
         else:
             # For ISO files, boot from CD-ROM
             cmd.extend(['-boot', 'order=d,menu=on'])  # d = CD-ROM
@@ -127,6 +128,10 @@ class QEMURunner:
         # Additional options for better compatibility
         cmd.extend(['-no-reboot'])
         
+        # Add RTC for USB devices for better time handling
+        if self._is_usb_device(boot_source):
+            cmd.extend(['-rtc', 'base=utc'])
+        
         # For USB devices (like Ventoy), add specific compatibility options
         if self._is_usb_device(boot_source):
             # Use standard VGA for better Ventoy compatibility
@@ -143,7 +148,15 @@ class QEMURunner:
     
     def _is_usb_device(self, path):
         """Check if path is a USB device (e.g., /dev/sdb)"""
-        return path.startswith('/dev/') and not path.lower().endswith('.iso')
+        if not path.startswith('/dev/') or path.lower().endswith('.iso'):
+            return False
+        
+        # Check if it's a block device
+        try:
+            mode = os.stat(path).st_mode
+            return stat.S_ISBLK(mode)
+        except (OSError, FileNotFoundError):
+            return False
     
     def _can_access_device(self, device_path):
         """Check if we can access the device without sudo"""
@@ -154,11 +167,33 @@ class QEMURunner:
         except (OSError, PermissionError):
             return False
     
+    def _prepare_usb_device(self, device_path):
+        """Prepare USB device for QEMU access by unmounting partitions"""
+        try:
+            # Unmount all partitions of this device
+            result = subprocess.run(['lsblk', '-ln', '-o', 'NAME', device_path], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line.strip():
+                        partition = f'/dev/{line.strip()}'
+                        if partition != device_path:  # Don't try to unmount the main device
+                            subprocess.run(['sudo', 'umount', partition], 
+                                         capture_output=True, stderr=subprocess.DEVNULL)
+                            print(f"Unmounted {partition}")
+        except Exception as e:
+            print(f"Warning: Could not prepare device {device_path}: {e}")
+    
     def run_boot_source(self, boot_source, **options):
         """Run a boot source (ISO file or USB device) with QEMU"""
         if not os.path.exists(boot_source):
             source_type = "USB device" if self._is_usb_device(boot_source) else "ISO file"
             raise FileNotFoundError(f"{source_type} not found: {boot_source}")
+        
+        # Prepare USB device if needed
+        if self._is_usb_device(boot_source):
+            print(f"Preparing USB device {boot_source} for QEMU...")
+            self._prepare_usb_device(boot_source)
         
         # Build command
         cmd = self.build_qemu_command(boot_source, **options)
