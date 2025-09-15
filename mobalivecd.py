@@ -38,8 +38,13 @@ class MobaLiveCDApplication(Adw.Application):
         # If we have a boot source from command line, load it (but don't run)
         if self.boot_source:
             if self.boot_source.startswith('/dev/'):
-                # It's a USB device
-                self.window.load_boot_source(self.boot_source, 'usb')
+                # Check if it's an NVMe partition or USB device
+                if 'nvme' in self.boot_source and 'p' in self.boot_source:
+                    # It's an NVMe partition
+                    self.window.load_boot_source(self.boot_source, 'nvme')
+                else:
+                    # It's a USB device
+                    self.window.load_boot_source(self.boot_source, 'usb')
             else:
                 # It's likely an ISO file
                 self.window.load_boot_source(self.boot_source, 'iso')
@@ -63,7 +68,13 @@ def main():
         if os.path.exists(boot_source_path):
             app.boot_source = boot_source_path
         else:
-            source_type = "USB device" if boot_source_path.startswith('/dev/') else "ISO file"
+            if boot_source_path.startswith('/dev/'):
+                if 'nvme' in boot_source_path and 'p' in boot_source_path:
+                    source_type = "NVMe partition"
+                else:
+                    source_type = "USB device"
+            else:
+                source_type = "ISO file"
             print(f"Error: {source_type} '{boot_source_path}' not found")
             return 1
     

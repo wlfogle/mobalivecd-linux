@@ -13,6 +13,7 @@ MobaLiveCD Linux allows you to easily test bootable CD/DVD ISO images using QEMU
 
 - Simple GUI for selecting and running ISO files
 - **NEW: USB Booting** - Boot USB devices directly in QEMU for testing
+- **NEW: NVMe Partition Booting** - Boot directly from NVMe partitions for testing installed OSes
 - **NEW: USB Creation** - Create bootable USB drives directly from ISO files
 - Built-in QEMU integration with optimized settings
 - File association support (right-click context menu for ISO files)
@@ -126,6 +127,58 @@ The application can register itself as a handler for ISO files, allowing right-c
 python3 mobalivecd.py /dev/sdb
 ```
 
+## NVMe Partition Booting
+
+**New Feature**: Boot directly from NVMe partitions to test installed operating systems!
+
+### GUI Method
+1. Click the "Select NVMe..." button
+2. Choose an NVMe partition from the detected list
+3. Review the safety warnings and understand the risks
+4. Click "Select" to choose the partition
+5. Click "Boot in QEMU" to test the selected partition
+
+### Command Line Method
+```bash
+# Boot NVMe partition directly
+python3 mobalivecd.py /dev/nvme0n1p2
+```
+
+### ⚠️ Important Safety Information
+
+**NVMe partition booting grants QEMU direct access to your storage device. Please understand the risks:**
+
+- QEMU will have **read/write access** to the selected partition
+- The guest OS may **modify data** on the partition
+- There is a **risk of data corruption** if not handled carefully
+- **Always backup important data** before using this feature
+- Consider using **snapshots** of your partitions for testing
+
+### Memory Allocation
+
+MobaLiveCD automatically adjusts memory allocation based on the boot source:
+- **ISO files**: 16GB RAM (for large live environments)
+- **USB devices**: 4GB RAM (optimized for portability)
+- **NVMe partitions**: 8GB RAM (balance of performance and safety)
+
+### Recommended Use Cases
+
+✅ **Good for:**
+- Testing OS installations before committing to hardware
+- Running different OS environments without dual boot
+- Debugging boot issues on installed systems
+- Educational purposes and experimentation
+
+⚠️ **Use with caution:**
+- Production systems with important data
+- Systems without proper backups
+- Partitions with file system corruption
+
+❌ **Not recommended:**
+- Root partitions of your main OS
+- Partitions containing irreplaceable data
+- Systems in active use by other processes
+
 ## USB Creation
 
 **New Feature**: Create bootable USB drives directly from ISO files!
@@ -194,11 +247,24 @@ Or use the "Install Association" button in the application to set up file associ
 
 ## Compatibility
 
-### Supported ISO Types
+### Supported Boot Sources
+
+**ISO Files:**
 - Linux LiveCD distributions (Ubuntu, Fedora, Debian, etc.)
 - Rescue/Recovery CDs (SystemRescue, Clonezilla, etc.)
 - Diagnostic tools (MemTest86, hardware testing CDs)
 - Any bootable ISO 9660 image
+
+**USB Devices:**
+- Bootable USB drives with any filesystem
+- Ventoy multi-boot USB drives
+- Rescue USB devices
+
+**NVMe Partitions:**
+- Linux installations (Ubuntu, Fedora, Arch, etc.)
+- Windows installations (Windows 10, 11)
+- BSD systems (FreeBSD, OpenBSD, etc.)
+- Any bootable partition with supported filesystems (ext2/3/4, NTFS, FAT32, etc.)
 
 ### System Requirements
 - **OS**: Any modern Linux distribution with GTK4 support
@@ -211,13 +277,16 @@ Or use the "Install Association" button in the application to set up file associ
 
 ### Improvements
 - Native Linux integration with modern GTK4 interface
+- **NVMe partition booting** for testing installed operating systems
+- **Smart memory allocation** based on boot source type
 - Automatic KVM acceleration when available
 - Better memory management and performance
 - Proper desktop environment integration
 - No bundled QEMU binaries (uses system QEMU)
 
 ### Features Maintained
-- Simple GUI for ISO file selection and execution
+- Simple GUI for boot source selection and execution
+- Support for ISO files, USB devices, and NVMe partitions
 - File association support for right-click menu
 - Help and about dialogs
 - Easy installation and uninstallation

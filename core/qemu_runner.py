@@ -9,6 +9,7 @@ import subprocess
 import shutil
 import tempfile
 from pathlib import Path
+from .nvme_handler import NVMeHandler
 
 class QEMURunner:
     """Handles QEMU execution for ISO files"""
@@ -18,6 +19,7 @@ class QEMURunner:
         self.default_memory = "16384M"  # 16 GB for testing large ISOs
         self.default_disk_interface = "ide"
         self.use_kvm = self.check_kvm_support()
+        self.nvme_handler = NVMeHandler()
         
     def find_qemu_binary(self):
         """Find the appropriate QEMU binary"""
@@ -52,17 +54,22 @@ class QEMURunner:
         # Base command
         cmd = [self.qemu_binary]
         
-        # Memory - reduce for USB devices to avoid memory mapping issues
+        # Memory allocation based on boot source type
         if self._is_usb_device(boot_source):
             memory = options.get('memory', '4096M')  # 4GB for USB devices
+        elif self._is_nvme_partition(boot_source):
+            memory = options.get('memory', '8192M')  # 8GB for NVMe partitions (balance between performance and safety)
         else:
             memory = options.get('memory', self.default_memory)  # 16GB for ISOs
         cmd.extend(['-m', memory])
         
-        # Machine type - use compatible version for USB devices
+        # Machine type selection based on boot source
         if self._is_usb_device(boot_source):
             # Use older, more compatible machine type for Ventoy
             machine_type = 'pc-q35-2.12'
+        elif self._is_nvme_partition(boot_source):
+            # Use Q35 chipset for NVMe partitions (better NVMe support)
+            machine_type = 'pc-q35-7.2'
         else:
             # Use modern machine type for ISOs
             machine_type = 'pc-i440fx-7.2'
@@ -84,29 +91,36 @@ class QEMURunner:
             # Use GTK display (remove GL to avoid potential issues)
             cmd.extend(['-display', 'gtk'])
         
-        # VGA - adjust based on boot source
+        # VGA adapter selection based on boot source
         if self._is_usb_device(boot_source):
             # Use standard VGA for USB devices (better Ventoy compatibility)
             vga = options.get('vga', 'std')
+        elif self._is_nvme_partition(boot_source):
+            # Use virtio for NVMe partitions (good performance with OS compatibility)
+            vga = options.get('vga', 'virtio')
         else:
             # Use virtio for ISO files (better performance)
             vga = options.get('vga', 'virtio')
         cmd.extend(['-vga', vga])
         
-        # Boot configuration - adjust based on device type
+        # Boot configuration based on source type
         if self._is_usb_device(boot_source):
             # For USB devices - comprehensive boot configuration with timeout
             cmd.extend(['-boot', 'order=c,menu=on,strict=off,splash-time=10000'])  # 10s timeout
+        elif self._is_nvme_partition(boot_source):
+            # For NVMe partitions - boot from hard disk with menu
+            cmd.extend(['-boot', 'order=c,menu=on,strict=off,splash-time=5000'])  # 5s timeout
         else:
             # For ISO files, boot from CD-ROM
             cmd.extend(['-boot', 'order=d,menu=on'])  # d = CD-ROM
         
-        # Determine if boot source is USB device or ISO file
-        is_usb_device = self._is_usb_device(boot_source)
-        
-        if is_usb_device:
+        # Configure storage device based on boot source type
+        if self._is_usb_device(boot_source):
             # Add USB device as primary hard drive for better compatibility with Ventoy
             cmd.extend(['-hda', boot_source])
+        elif self._is_nvme_partition(boot_source):
+            # Add NVMe partition as primary hard drive with optimized settings
+            cmd.extend(['-drive', f'file={boot_source},format=raw,cache=none,if=virtio'])
         else:
             # Add ISO as CD-ROM with better caching
             cmd.extend(['-drive', f'file={boot_source},media=cdrom,readonly=on,cache=unsafe'])
@@ -151,12 +165,20 @@ class QEMURunner:
         if not path.startswith('/dev/') or path.lower().endswith('.iso'):
             return False
         
+        # Exclude NVMe partitions from USB device detection
+        if self._is_nvme_partition(path):
+            return False
+        
         # Check if it's a block device
         try:
             mode = os.stat(path).st_mode
             return stat.S_ISBLK(mode)
         except (OSError, FileNotFoundError):
             return False
+    
+    def _is_nvme_partition(self, path):
+        """Check if path is an NVMe partition (e.g., /dev/nvme0n1p1)"""
+        return self.nvme_handler.is_nvme_partition(path)
     
     def _can_access_device(self, device_path):
         """Check if we can access the device without sudo"""
@@ -184,24 +206,41 @@ class QEMURunner:
         except Exception as e:
             print(f"Warning: Could not prepare device {device_path}: {e}")
     
+    def _prepare_nvme_partition(self, device_path):
+        """Prepare NVMe partition for QEMU access by unmounting if necessary"""
+        try:
+            # Use the NVMe handler to safely unmount the partition
+            self.nvme_handler.unmount_partition(device_path)
+        except Exception as e:
+            print(f"Warning: Could not prepare NVMe partition {device_path}: {e}")
+    
     def run_boot_source(self, boot_source, **options):
-        """Run a boot source (ISO file or USB device) with QEMU"""
+        """Run a boot source (ISO file, USB device, or NVMe partition) with QEMU"""
         if not os.path.exists(boot_source):
-            source_type = "USB device" if self._is_usb_device(boot_source) else "ISO file"
+            if self._is_nvme_partition(boot_source):
+                source_type = "NVMe partition"
+            elif self._is_usb_device(boot_source):
+                source_type = "USB device"
+            else:
+                source_type = "ISO file"
             raise FileNotFoundError(f"{source_type} not found: {boot_source}")
         
-        # Prepare USB device if needed
+        # Prepare device if needed
         if self._is_usb_device(boot_source):
             print(f"Preparing USB device {boot_source} for QEMU...")
             self._prepare_usb_device(boot_source)
+        elif self._is_nvme_partition(boot_source):
+            print(f"Preparing NVMe partition {boot_source} for QEMU...")
+            self._prepare_nvme_partition(boot_source)
         
         # Build command
         cmd = self.build_qemu_command(boot_source, **options)
         
-        # Check if we need sudo for USB device access
-        if self._is_usb_device(boot_source):
+        # Check if we need sudo for device access
+        if self._is_usb_device(boot_source) or self._is_nvme_partition(boot_source):
             if not self._can_access_device(boot_source):
-                print(f"USB device requires elevated permissions, using sudo...")
+                device_type = "NVMe partition" if self._is_nvme_partition(boot_source) else "USB device"
+                print(f"{device_type} requires elevated permissions, using sudo...")
                 cmd = ['sudo'] + cmd
         
         # Log the command for debugging
@@ -262,11 +301,14 @@ class QEMURunner:
         return info
     
     def validate_boot_source(self, boot_source):
-        """Basic validation of boot source (ISO file or USB device)"""
+        """Basic validation of boot source (ISO file, USB device, or NVMe partition)"""
         if not os.path.exists(boot_source):
             return False, "Boot source does not exist"
         
-        if self._is_usb_device(boot_source):
+        if self._is_nvme_partition(boot_source):
+            # Validate NVMe partition using specialized handler
+            return self.nvme_handler.validate_nvme_partition(boot_source)
+        elif self._is_usb_device(boot_source):
             # Validate USB device
             try:
                 # Check if it's a block device

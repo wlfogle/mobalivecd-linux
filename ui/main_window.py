@@ -14,6 +14,7 @@ from ui.help_dialog import HelpDialog
 from ui.about_dialog import AboutDialog
 from ui.usb_dialog import USBCreationDialog
 from ui.usb_selector_dialog import USBSelectorDialog
+from ui.nvme_selector_dialog import NVMePartitionSelectorDialog
 
 class MobaLiveCDWindow(Adw.ApplicationWindow):
     """Main application window"""
@@ -24,7 +25,7 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         # Initialize QEMU runner
         self.qemu_runner = QEMURunner()
         self.current_boot_source = None
-        self.boot_source_type = None  # 'iso' or 'usb'
+        self.boot_source_type = None  # 'iso', 'usb', or 'nvme'
         
         # Set up window properties
         self.set_title("MobaLiveCD")
@@ -129,12 +130,12 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         """Create boot source selection section"""
         boot_group = Adw.PreferencesGroup()
         boot_group.set_title("Boot Source Selection")
-        boot_group.set_description("Select either an ISO file or USB device to boot in QEMU")
+        boot_group.set_description("Select an ISO file, USB device, or NVMe partition to boot in QEMU")
         
         # Boot source selection row
         boot_row = Adw.ActionRow()
         boot_row.set_title("Choose boot source")
-        boot_row.set_subtitle("Select an ISO file or USB device to boot in QEMU virtual machine")
+        boot_row.set_subtitle("Select an ISO file, USB device, or NVMe partition to boot in QEMU virtual machine")
         
         # Current boot source label
         self.boot_source_label = Gtk.Label()
@@ -157,6 +158,12 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
         select_usb_button.set_label("Select USB...")
         select_usb_button.connect("clicked", self.on_select_usb)
         button_box.append(select_usb_button)
+        
+        # Select NVMe partition button
+        select_nvme_button = Gtk.Button()
+        select_nvme_button.set_label("Select NVMe...")
+        select_nvme_button.connect("clicked", self.on_select_nvme)
+        button_box.append(select_nvme_button)
         
         # Run button
         self.run_button = Gtk.Button()
@@ -273,8 +280,12 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
                 self.boot_source_label.set_text(f"ISO: {os.path.basename(source_path)}")
                 self.usb_creation_group.set_visible(True)
                 self.usb_button.set_sensitive(True)
-            else:  # USB device
+            elif source_type == 'usb':
                 self.boot_source_label.set_text(f"USB: {source_path}")
+                self.usb_creation_group.set_visible(False)
+                self.usb_button.set_sensitive(False)
+            else:  # NVMe partition
+                self.boot_source_label.set_text(f"NVMe: {source_path}")
                 self.usb_creation_group.set_visible(False)
                 self.usb_button.set_sensitive(False)
             
@@ -298,6 +309,20 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
                 device_path = dialog.get_selected_device()
                 if device_path:
                     self.load_boot_source(device_path, 'usb')
+            dialog.destroy()
+        
+        dialog.connect('response', on_dialog_response)
+    
+    def on_select_nvme(self, button):
+        """Handle NVMe partition selection"""
+        dialog = NVMePartitionSelectorDialog(self)
+        dialog.present()
+        
+        def on_dialog_response(dialog, response_id):
+            if response_id == 'select':
+                partition_path = dialog.get_selected_partition()
+                if partition_path:
+                    self.load_boot_source(partition_path, 'nvme')
             dialog.destroy()
         
         dialog.connect('response', on_dialog_response)
