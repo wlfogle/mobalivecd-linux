@@ -400,7 +400,7 @@ class AIEnhancedQEMURunner:
         # Identify OS type based on filesystem and label
         if 'ntfs' in fstype or 'windows' in label or 'microsoft' in label:
             return 'nvme_windows', self.iso_profiles['nvme_windows']
-        elif fstype in ['ext4', 'ext3', 'ext2', 'btrfs', 'xfs', 'zfs'] or 'linux' in label:
+        elif fstype in ['ext4', 'ext3', 'ext2', 'btrfs', 'xfs', 'zfs', 'zfs_member'] or 'linux' in label:
             return 'nvme_linux', self.iso_profiles['nvme_linux']
         else:
             # Default to generic for unknown filesystems
@@ -541,11 +541,13 @@ class AIEnhancedQEMURunner:
             
             # Add EFI support for UEFI boot (crucial for ZFS)
             if '-bios' not in ' '.join(profile.special_flags or []):
-                # Check for OVMF availability
+                # Check for OVMF availability (Arch/Garuda Linux paths)
                 ovmf_paths = [
-                    '/usr/share/ovmf/OVMF.fd',
-                    '/usr/share/edk2-ovmf/OVMF_CODE.fd',
-                    '/usr/share/qemu/edk2-x86_64-code.fd'
+                    '/usr/share/edk2/x64/OVMF_CODE.4m.fd',  # Arch/Garuda Linux
+                    '/usr/share/edk2/x64/OVMF.4m.fd',       # Arch/Garuda Linux alternative
+                    '/usr/share/ovmf/OVMF.fd',              # Generic path
+                    '/usr/share/edk2-ovmf/OVMF_CODE.fd',    # Ubuntu/Debian path
+                    '/usr/share/qemu/edk2-x86_64-code.fd'   # CentOS/RHEL path
                 ]
                 for ovmf_path in ovmf_paths:
                     if os.path.exists(ovmf_path):
@@ -618,7 +620,8 @@ class AIEnhancedQEMURunner:
         # Special messaging for ZFS
         if self._is_nvme_partition(boot_path) and self.nvme_handler:
             partition_info = self.nvme_handler.get_partition_info(boot_path)
-            if partition_info and partition_info.get('fstype', '').lower() == 'zfs':
+            fstype = (partition_info.get('fstype') or '').lower() if partition_info else ''
+            if 'zfs' in fstype:  # Matches both 'zfs' and 'zfs_member'
                 print("🌊 ZFS partition detected - UEFI boot enabled for compatibility")
         
         try:
