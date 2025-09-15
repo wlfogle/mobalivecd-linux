@@ -9,7 +9,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib
 import os
 import threading
-from core.qemu_runner import QEMURunner
+from core.enhanced_qemu_runner import AIEnhancedQEMURunner
 from ui.help_dialog import HelpDialog
 from ui.about_dialog import AboutDialog
 from ui.usb_dialog import USBCreationDialog
@@ -22,8 +22,8 @@ class MobaLiveCDWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # Initialize QEMU runner
-        self.qemu_runner = QEMURunner()
+        # Initialize enhanced QEMU runner with ZFS/UEFI support
+        self.qemu_runner = AIEnhancedQEMURunner()
         self.current_boot_source = None
         self.boot_source_type = None  # 'iso', 'usb', or 'nvme'
         

@@ -121,6 +121,9 @@ class QEMURunner:
         elif self._is_nvme_partition(boot_source):
             # Add NVMe partition as primary hard drive with optimized settings
             cmd.extend(['-drive', f'file={boot_source},format=raw,cache=none,if=virtio'])
+            
+            # Add UEFI support for NVMe partitions (especially ZFS)
+            self._add_uefi_support(cmd, boot_source)
         else:
             # Add ISO as CD-ROM with better caching
             cmd.extend(['-drive', f'file={boot_source},media=cdrom,readonly=on,cache=unsafe'])

@@ -571,18 +571,30 @@ class AIEnhancedQEMURunner:
         
         return cmd
     
-    def run_boot_source(self, boot_path: str, **options) -> int:
-        """Run any boot source (ISO or NVMe partition) with AI optimization"""
+    def validate_boot_source(self, boot_path: str) -> tuple[bool, str]:
+        """Validate a boot source (ISO file, USB device, or NVMe partition)"""
         
         if not os.path.exists(boot_path):
             source_type = "NVMe partition" if self._is_nvme_partition(boot_path) else "ISO file"
-            raise FileNotFoundError(f"{source_type} not found: {boot_path}")
+            return False, f"{source_type} not found: {boot_path}"
         
         # Validate NVMe partition if applicable
         if self._is_nvme_partition(boot_path) and self.nvme_handler:
             is_valid, message = self.nvme_handler.validate_nvme_partition(boot_path)
-            if not is_valid:
-                raise RuntimeError(f"Invalid NVMe partition: {message}")
+            return is_valid, message
+        
+        # For ISO files and other sources, just check if file exists
+        return True, "Boot source is valid"
+    
+    def run_boot_source(self, boot_path: str, **options) -> int:
+        """Run any boot source (ISO or NVMe partition) with AI optimization"""
+        
+        # Validate boot source first
+        is_valid, message = self.validate_boot_source(boot_path)
+        if not is_valid:
+            raise RuntimeError(message)
+        
+        if self._is_nvme_partition(boot_path):
             print(f"✅ {message}")
         
         # Build optimized command
