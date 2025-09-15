@@ -108,9 +108,45 @@ class NVMePartitionSelectorDialog(Adw.Window):
     
     def refresh_partitions(self):
         """Refresh the list of available NVMe partitions"""
-        # Clear existing partition rows
-        while child := self.partitions_group.get_first_child():
-            self.partitions_group.remove(child)
+        # Clear existing partition rows by creating a new preferences group
+        # This avoids the GTK widget removal issues
+        try:
+            # Get parent container
+            parent = self.partitions_group.get_parent()
+            if parent:
+                # Remove old group
+                parent.remove(self.partitions_group)
+                
+                # Create new group
+                self.partitions_group = Adw.PreferencesGroup()
+                self.partitions_group.set_title("Available NVMe Partitions")
+                
+                # Add back to parent (after refresh_group and before content end)
+                # Find the refresh group to insert before it
+                refresh_child = None
+                child = parent.get_first_child()
+                while child is not None:
+                    if hasattr(child, 'get_title') and child.get_title() and "refresh" in child.get_title().lower():
+                        refresh_child = child
+                        break
+                    child = child.get_next_sibling()
+                
+                if refresh_child:
+                    parent.insert_child_before(self.partitions_group, refresh_child)
+                else:
+                    parent.append(self.partitions_group)
+            else:
+                # Fallback: try to clear children individually but more safely
+                while True:
+                    child = self.partitions_group.get_first_child()
+                    if child is None:
+                        break
+                    try:
+                        self.partitions_group.remove(child)
+                    except:
+                        break  # Exit if removal fails
+        except Exception as e:
+            print(f"Warning: Error during partition refresh: {e}")
         
         # Reset selection
         self.selected_partition = None
