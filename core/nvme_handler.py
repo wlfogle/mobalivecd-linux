@@ -154,8 +154,8 @@ class NVMeHandler:
     
     def _check_bootable(self, part_name, partition_info):
         """Check if a partition is potentially bootable"""
-        fstype = partition_info.get('fstype', '').lower()
-        label = partition_info.get('label', '').lower()
+        fstype = (partition_info.get('fstype') or '').lower()
+        label = (partition_info.get('label') or '').lower()
         
         # Common bootable filesystem types
         bootable_fs = ['fat32', 'vfat', 'fat16', 'ntfs', 'ext2', 'ext3', 'ext4', 'btrfs', 'xfs']

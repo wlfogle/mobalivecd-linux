@@ -11,10 +11,32 @@ import json
 import re
 import threading
 import time
-import psutil
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    # Create dummy psutil for basic functionality
+    class DummyPsutil:
+        @staticmethod
+        def cpu_count(logical=True):
+            return 4 if logical else 2
+        @staticmethod
+        def virtual_memory():
+            class Memory:
+                total = 8 * 1024**3  # 8GB default
+            return Memory()
+    psutil = DummyPsutil()
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+
+try:
+    from .nvme_handler import NVMeHandler
+    NVME_SUPPORT = True
+except ImportError:
+    NVME_SUPPORT = False
+    print("Warning: NVMe support not available")
 
 @dataclass
 class SystemCapabilities:
@@ -52,6 +74,12 @@ class AIEnhancedQEMURunner:
         self.iso_profiles = self._load_iso_profiles()
         self.active_processes = {}
         self._init_performance_monitoring()
+        
+        # Initialize NVMe support if available
+        if NVME_SUPPORT:
+            self.nvme_handler = NVMeHandler()
+        else:
+            self.nvme_handler = None
         
     def _find_optimal_qemu_binary(self) -> str:
         """Find the best QEMU binary for the system"""
@@ -257,6 +285,45 @@ class AIEnhancedQEMURunner:
                 boot_priority="d",
                 special_flags=["-machine", "type=q35", "-vga", "virtio"],
                 description="Gaming-optimized Linux distribution"
+            ),
+            'nvme_linux': ISOProfile(
+                name="NVMe Linux Partition",
+                category="Installed OS",
+                memory_min="4G",
+                memory_recommended="8G",
+                cpu_cores=4,
+                enable_3d=True,
+                enable_audio=True,
+                network_mode="virtio",
+                boot_priority="c",  # Boot from hard disk
+                special_flags=["-machine", "type=q35", "-bios", "/usr/share/ovmf/OVMF.fd"],
+                description="Boot from NVMe partition with UEFI support"
+            ),
+            'nvme_windows': ISOProfile(
+                name="NVMe Windows Partition",
+                category="Installed OS",
+                memory_min="4G",
+                memory_recommended="12G",
+                cpu_cores=4,
+                enable_3d=True,
+                enable_audio=True,
+                network_mode="e1000",
+                boot_priority="c",  # Boot from hard disk
+                special_flags=["-machine", "type=q35", "-bios", "/usr/share/ovmf/OVMF.fd"],
+                description="Boot from NVMe Windows partition with UEFI support"
+            ),
+            'nvme_generic': ISOProfile(
+                name="NVMe Generic Partition",
+                category="Installed OS",
+                memory_min="2G",
+                memory_recommended="8G",
+                cpu_cores=2,
+                enable_3d=True,
+                enable_audio=True,
+                network_mode="virtio",
+                boot_priority="c",  # Boot from hard disk
+                special_flags=["-machine", "type=q35"],
+                description="Generic NVMe partition boot (Legacy BIOS)"
             )
         }
         
@@ -302,7 +369,44 @@ class AIEnhancedQEMURunner:
                 print(f"Performance monitoring error: {e}")
                 time.sleep(10)
     
-    def identify_iso(self, iso_path: str) -> Tuple[str, ISOProfile]:
+    def identify_boot_source(self, boot_path: str) -> Tuple[str, ISOProfile]:
+        """AI-powered boot source identification and profile selection"""
+        
+        # Check if it's an NVMe partition
+        if self._is_nvme_partition(boot_path):
+            return self._identify_nvme_partition(boot_path)
+        
+        # Otherwise treat as ISO
+        return self._identify_iso_file(boot_path)
+    
+    def _is_nvme_partition(self, path: str) -> bool:
+        """Check if path is an NVMe partition"""
+        return (path.startswith('/dev/nvme') and 'p' in path and 
+                self.nvme_handler and self.nvme_handler.is_nvme_partition(path))
+    
+    def _identify_nvme_partition(self, nvme_path: str) -> Tuple[str, ISOProfile]:
+        """Identify NVMe partition type and select appropriate profile"""
+        if not self.nvme_handler:
+            return 'nvme_generic', self.iso_profiles['nvme_generic']
+        
+        # Get partition info
+        partition_info = self.nvme_handler.get_partition_info(nvme_path)
+        if not partition_info:
+            return 'nvme_generic', self.iso_profiles['nvme_generic']
+        
+        fstype = (partition_info.get('fstype') or '').lower()
+        label = (partition_info.get('label') or '').lower()
+        
+        # Identify OS type based on filesystem and label
+        if 'ntfs' in fstype or 'windows' in label or 'microsoft' in label:
+            return 'nvme_windows', self.iso_profiles['nvme_windows']
+        elif fstype in ['ext4', 'ext3', 'ext2', 'btrfs', 'xfs', 'zfs'] or 'linux' in label:
+            return 'nvme_linux', self.iso_profiles['nvme_linux']
+        else:
+            # Default to generic for unknown filesystems
+            return 'nvme_generic', self.iso_profiles['nvme_generic']
+    
+    def _identify_iso_file(self, iso_path: str) -> Tuple[str, ISOProfile]:
         """AI-powered ISO identification and profile selection"""
         iso_name = os.path.basename(iso_path).lower()
         
@@ -325,6 +429,11 @@ class AIEnhancedQEMURunner:
         
         # Default to Debian profile for unknown ISOs
         return 'debian', self.iso_profiles['debian']
+    
+    # Keep backward compatibility
+    def identify_iso(self, iso_path: str) -> Tuple[str, ISOProfile]:
+        """Backward compatibility wrapper"""
+        return self.identify_boot_source(iso_path)
     
     def calculate_optimal_resources(self, profile: ISOProfile) -> Dict[str, str]:
         """Calculate optimal resource allocation based on system capabilities"""
@@ -361,11 +470,11 @@ class AIEnhancedQEMURunner:
             return float(memory_str.replace('M', '')) / 1024
         return 1.0  # Default
     
-    def build_optimized_command(self, iso_path: str, **user_options) -> List[str]:
-        """Build AI-optimized QEMU command"""
+    def build_optimized_command(self, boot_path: str, **user_options) -> List[str]:
+        """Build AI-optimized QEMU command for any boot source"""
         
-        # Identify ISO and get profile
-        profile_key, profile = self.identify_iso(iso_path)
+        # Identify boot source and get profile
+        profile_key, profile = self.identify_boot_source(boot_path)
         optimal_resources = self.calculate_optimal_resources(profile)
         
         # Start building command
@@ -417,9 +526,44 @@ class AIEnhancedQEMURunner:
         # USB and tablet for better mouse handling
         cmd.extend(['-usb', '-device', 'usb-tablet'])
         
-        # Boot configuration
-        cmd.extend(['-boot', profile.boot_priority])
-        cmd.extend(['-cdrom', iso_path])
+        # Boot configuration based on source type
+        if self._is_nvme_partition(boot_path):
+            # NVMe partition - boot from hard disk
+            cmd.extend(['-boot', profile.boot_priority])
+            
+            # Add NVMe partition as primary drive
+            if 'nvme_linux' in profile_key or 'nvme_generic' in profile_key:
+                # For Linux/ZFS, use virtio for better performance
+                cmd.extend(['-drive', f'file={boot_path},format=raw,cache=none,if=virtio'])
+            else:
+                # For Windows, use IDE for better compatibility
+                cmd.extend(['-drive', f'file={boot_path},format=raw,cache=none,if=ide'])
+            
+            # Add EFI support for UEFI boot (crucial for ZFS)
+            if '-bios' not in ' '.join(profile.special_flags or []):
+                # Check for OVMF availability
+                ovmf_paths = [
+                    '/usr/share/ovmf/OVMF.fd',
+                    '/usr/share/edk2-ovmf/OVMF_CODE.fd',
+                    '/usr/share/qemu/edk2-x86_64-code.fd'
+                ]
+                for ovmf_path in ovmf_paths:
+                    if os.path.exists(ovmf_path):
+                        cmd.extend(['-bios', ovmf_path])
+                        break
+                else:
+                    print("⚠️ Warning: OVMF UEFI firmware not found. Install ovmf package for UEFI support.")
+            
+            # Unmount partition if needed
+            if self.nvme_handler:
+                try:
+                    self.nvme_handler.unmount_partition(boot_path)
+                except Exception as e:
+                    print(f"Warning: Could not unmount {boot_path}: {e}")
+        else:
+            # ISO file - boot from CD-ROM
+            cmd.extend(['-boot', profile.boot_priority])
+            cmd.extend(['-cdrom', boot_path])
         
         # Performance optimizations
         cmd.extend(['-no-reboot'])
@@ -427,23 +571,43 @@ class AIEnhancedQEMURunner:
         
         return cmd
     
-    def run_optimized_iso(self, iso_path: str, **options) -> int:
-        """Run ISO with AI optimization"""
+    def run_boot_source(self, boot_path: str, **options) -> int:
+        """Run any boot source (ISO or NVMe partition) with AI optimization"""
         
-        if not os.path.exists(iso_path):
-            raise FileNotFoundError(f"ISO file not found: {iso_path}")
+        if not os.path.exists(boot_path):
+            source_type = "NVMe partition" if self._is_nvme_partition(boot_path) else "ISO file"
+            raise FileNotFoundError(f"{source_type} not found: {boot_path}")
+        
+        # Validate NVMe partition if applicable
+        if self._is_nvme_partition(boot_path) and self.nvme_handler:
+            is_valid, message = self.nvme_handler.validate_nvme_partition(boot_path)
+            if not is_valid:
+                raise RuntimeError(f"Invalid NVMe partition: {message}")
+            print(f"✅ {message}")
         
         # Build optimized command
-        cmd = self.build_optimized_command(iso_path, **options)
+        cmd = self.build_optimized_command(boot_path, **options)
+        
+        # Check for sudo requirement for NVMe partitions
+        if self._is_nvme_partition(boot_path):
+            if not self._can_access_device(boot_path):
+                print("🔐 NVMe partition requires elevated permissions, using sudo...")
+                cmd = ['sudo'] + cmd
         
         # Log command for debugging
         print(f"🚀 AI-Optimized QEMU Command:")
         print(f"   {' '.join(cmd)}")
         
         # Get profile info for display
-        profile_key, profile = self.identify_iso(iso_path)
+        profile_key, profile = self.identify_boot_source(boot_path)
         print(f"📊 Detected: {profile.name} ({profile.category})")
         print(f"💡 {profile.description}")
+        
+        # Special messaging for ZFS
+        if self._is_nvme_partition(boot_path) and self.nvme_handler:
+            partition_info = self.nvme_handler.get_partition_info(boot_path)
+            if partition_info and partition_info.get('fstype', '').lower() == 'zfs':
+                print("🌊 ZFS partition detected - UEFI boot enabled for compatibility")
         
         try:
             # Launch QEMU
@@ -464,10 +628,11 @@ class AIEnhancedQEMURunner:
             
             # Add to monitoring
             self.active_processes[process.pid] = {
-                'iso_path': iso_path,
+                'boot_path': boot_path,
                 'profile': profile_key,
                 'start_time': time.time(),
-                'command': cmd
+                'command': cmd,
+                'is_nvme': self._is_nvme_partition(boot_path)
             }
             
             print(f"✅ QEMU started successfully (PID: {process.pid})")
@@ -477,6 +642,19 @@ class AIEnhancedQEMURunner:
             raise RuntimeError(f"QEMU binary '{self.qemu_binary}' not found")
         except Exception as e:
             raise RuntimeError(f"Failed to start QEMU: {e}")
+    
+    def _can_access_device(self, device_path: str) -> bool:
+        """Check if we can access the device without sudo"""
+        try:
+            with open(device_path, 'rb') as f:
+                f.read(1)
+            return True
+        except (OSError, PermissionError):
+            return False
+    
+    def run_optimized_iso(self, iso_path: str, **options) -> int:
+        """Run ISO with AI optimization (backward compatibility wrapper)"""
+        return self.run_boot_source(iso_path, **options)
     
     def get_system_diagnostics(self) -> Dict:
         """Get comprehensive system diagnostics"""
